@@ -294,12 +294,12 @@ INTERRUPT_HANDLER(TIM1_CAP_COM_IRQHandler, 12)
   * @param  None
   * @retval None
   */
- INTERRUPT_HANDLER(TIM3_UPD_OVF_BRK_IRQHandler, 15)
-{
+ //INTERRUPT_HANDLER(TIM3_UPD_OVF_BRK_IRQHandler, 15)
+//{
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
-}
+//}
 
 /**
   * @brief  Timer3 Capture/Compare Interrupt routine
