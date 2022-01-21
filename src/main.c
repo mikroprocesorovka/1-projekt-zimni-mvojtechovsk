@@ -18,8 +18,9 @@ neopixel DI - PC
 encoder CLK - PF7
         DT - PF6
 */
-
-uint16_t vzdalenost = 400;
+uint8_t colors[24*3];
+uint16_t minVzdalenost = 100;
+uint16_t vzdalenost = 120;
 static uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
 	// pokud je na vstupu A hodnota 0 a minule byla hodnota 1 tak jsme zachytili sestupnou hranu
 void init_spi(void)
@@ -82,8 +83,7 @@ void neopixel(uint8_t * data, uint16_t length)
 }
 
 
-// test pattern for (16 RGB LED ring)
-uint8_t colors[24*3];
+
 
 void my_delay_ms(uint16_t ms) {
     uint16_t  i;
@@ -103,10 +103,10 @@ void my_delay_ms(uint16_t ms) {
 		// pøeèteme stav vstupu B
 		if(GPIO_ReadInputPin(GPIOF,GPIO_PIN_6) == RESET){
 			// log.0 na vstupu B (krok jedním smìrem)
-			vzdalenost++;
+			minVzdalenost++;
 		}else{
 			// log.1 na vstupu B (krok druhým smìrem)
-			vzdalenost--;
+			minVzdalenost--;
 		}
 	}
 	if(GPIO_ReadInputPin(GPIOF,GPIO_PIN_7) != RESET){minule = 1;} // pokud je vstup A v log.1
@@ -129,19 +129,43 @@ TIM3_ITConfig(TIM3_IT_UPDATE, ENABLE); // povolit pøerušení
 TIM3_Cmd(ENABLE); // spustit timer
 }
 
-void minVzdalenost(void){
+void vzdalenostMin(void){
 }
 
-void fillAll(uint16_t r,uint16_t g,uint16_t b ) {
-    uint16_t  i = 0;
-    while(i<=24*3){
-        colors[i] = r;
-        colors[i+1] = g;
-        colors[i+2] = b;
-        i = i+3;
+void fillAll(uint8_t r,uint8_t g,uint8_t b ) {
+    
+    uint8_t  i = 0;
+    while(i<24){
+        uint8_t index = i*3;
+        colors[index] = r;
+        colors[index+1] = g;
+        colors[index+2] = b;
+        i = i+1;
+    }
+    
+    neopixel(colors, sizeof(colors));
+}
+
+void clearAll(){
+    uint8_t  i = 0;
+    while(i<24){
+        uint8_t index = i*3;
+        colors[index] = 0;
+        colors[index+1] = 0;
+        colors[index+2] = 0;
+        i = i+1;
     }
     neopixel(colors, sizeof(colors));
 }
+
+void tooClose(void){
+        fillAll(0, 150, 0);
+        my_delay_ms(200);
+        clearAll();
+        my_delay_ms(200);
+    }
+    
+    
 
 int main(void)
 {
@@ -152,10 +176,17 @@ int main(void)
     init_timer();    // spustí tim3 s poerušením každé 2ms
     setup();
     init_spi();
-    fillAll(20,0,0);
+    fillAll(0,0,20);
+    
+    
     while (1) {
-        my_delay_ms(10);
-        printf("%d\r\n", vzdalenost);
+        while( vzdalenost < minVzdalenost){
+            tooClose();
+            printf("%d\r\n", minVzdalenost);
+        }
+        fillAll(255, 120, 0);
+        my_delay_ms(200);
+        printf("%d\r\n", minVzdalenost);
     }
 
 }
