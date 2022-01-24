@@ -5,22 +5,24 @@
 #warning F_CPU is not defined!
 #endif
 
+#include "stm8s.h"
+
 /* 
  * Func delayed N cycles, where N = 3 + ( ticks * 3 )
  * so, ticks = ( N - 3 ) / 3, minimum delay is 6 CLK
  * when tick = 1, because 0 equels 65535
  */
 
-static @inline void _delay_cycl( unsigned short __ticks )
+static inline void _delay_cycl( unsigned short __ticks )
 {
 #if defined(__CSMC__)
 /* COSMIC */
-  //#define T_COUNT(x) ((( F_CPU * x / 1000000UL )-3)/3) // pùvodní varianta byla pøesnìjší ale hrozila podtíkáním
+  //#define T_COUNT(x) ((( F_CPU * x / 1000000UL )-3)/3) // pÃ¹vodnÃ­ varianta byla pÃ¸esnÃ¬jÅ¡Ã­ ale hrozila podtÃ­kÃ¡nÃ­m
 	#define T_COUNT(x) (( F_CPU * x / 1000000UL ))/3+1
 	// ldw X, __ticks ; insert automaticaly
 	_asm("nop\n $N:\n decw X\n jrne $L\n nop\n ", __ticks);
 #elif defined(__SDCC)
-    //#define T_COUNT(x) ((( F_CPU * x / 1000000UL )-5)/5) // pùvodní varianta byla pøesnìjší ale hrozila podtíkáním
+    //#define T_COUNT(x) ((( F_CPU * x / 1000000UL )-5)/5) // pÃ¹vodnÃ­ varianta byla pÃ¸esnÃ¬jÅ¡Ã­ ale hrozila podtÃ­kÃ¡nÃ­m
     #define T_COUNT(x) ((( F_CPU * x / 1000000UL ))/8+1)
 	__asm__("nop\n nop\n"); 
 	do { 		// ASM: ldw X, #tick; lab$: decw X; tnzw X; jrne lab$
@@ -38,7 +40,7 @@ static @inline void _delay_cycl( unsigned short __ticks )
 #endif
 }
 
-static @inline void _delay_us( const unsigned short __us ){
+static inline void _delay_us(const unsigned short __us){
 	_delay_cycl( (unsigned short)( T_COUNT(__us) ));
 }
 
