@@ -12,15 +12,33 @@
 #define _ISOC99_SOURCE
 #define _GNU_SOURCE
 
+#define TI1_PORT GPIOD
+#define TI1_PIN  GPIO_PIN_4
 
+#define TRGG_PORT GPIOC
+#define TRGG_PIN  GPIO_PIN_7
+#define TRGG_ON   GPIO_WriteHigh(TRGG_PORT, TRGG_PIN);
+#define TRGG_OFF  GPIO_WriteLow(TRGG_PORT, TRGG_PIN);
+#define TRGG_REVERSE GPIO_WriteReverse(TRGG_PORT, TRGG_PIN);
+
+#define MASURMENT_PERON 444    // maximální celkový čas měření (ms)
+
+
+#define CLK_PORT GPIOF
+#define CLK_PIN  GPIO_PIN_4
+
+#define DT_PORT GPIOF
+#define DT_PIN  GPIO_PIN_3
 /*
-neopixel DI - PC
-encoder CLK - PF7
-        DT - PF6
+
+
+neopixel DI - PC6
+
 */
 uint8_t colors[24*3];
 uint16_t minVzdalenost = 100;
 uint16_t vzdalenost = 120;
+uint16_t vzdalenostMinule;
 static uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
 	// pokud je na vstupu A hodnota 0 a minule byla hodnota 1 tak jsme zachytili sestupnou hranu
 void init_spi(void)
@@ -98,18 +116,20 @@ void my_delay_ms(uint16_t ms) {
  
  void process_enc(void){
 	
-	if(GPIO_ReadInputPin(GPIOF,GPIO_PIN_7) == RESET && minule==1){
+	if(GPIO_ReadInputPin(CLK_PORT,CLK_PIN) == RESET && minule==1){
 		minule = 0; // nyní je pin v log.0
 		// pøeèteme stav vstupu B
-		if(GPIO_ReadInputPin(GPIOF,GPIO_PIN_6) == RESET){
+		if(GPIO_ReadInputPin(DT_PORT,DT_PIN) == RESET){
 			// log.0 na vstupu B (krok jedním smìrem)
+            vzdalenostMinule = minVzdalenost;
 			minVzdalenost++;
 		}else{
 			// log.1 na vstupu B (krok druhým smìrem)
+            vzdalenostMinule = minVzdalenost;
 			minVzdalenost--;
 		}
 	}
-	if(GPIO_ReadInputPin(GPIOF,GPIO_PIN_7) != RESET){minule = 1;} // pokud je vstup A v log.1
+	if(GPIO_ReadInputPin(CLK_PORT,CLK_PIN) != RESET){minule = 1;} // pokud je vstup A v log.1
 }
  
  INTERRUPT_HANDLER(TIM3_UPD_OVF_BRK_IRQHandler, 15)
@@ -119,8 +139,8 @@ void my_delay_ms(uint16_t ms) {
  }
 void init_enc(void){
 	// enkodéry jsou jen spínaèe, takže vstupy volíme ve stejném režimu jako pro tlaèítka
-GPIO_Init(GPIOF,GPIO_PIN_7,GPIO_MODE_IN_PU_NO_IT);  // vstup, s vnitøním pullup rezistorem
-GPIO_Init(GPIOF,GPIO_PIN_6,GPIO_MODE_IN_PU_NO_IT);
+GPIO_Init(CLK_PORT,CLK_PIN,GPIO_MODE_IN_PU_NO_IT);  // vstup, s vnitøním pullup rezistorem
+GPIO_Init(DT_PORT,DT_PIN,GPIO_MODE_IN_PU_NO_IT);
 }
 
 void init_timer(void){
@@ -165,10 +185,13 @@ void tooClose(void){
         my_delay_ms(200);
     }
     
-    
+
+
 
 int main(void)
 {
+    char text[32] = "";
+    vzdalenostMinule = minVzdalenost;
     CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1); // 16MHz from internal RC
     init_milis(); // millis using TIM4 - not necessary
     init_spi();
@@ -176,18 +199,33 @@ int main(void)
     init_timer();    // spustí tim3 s poerušením každé 2ms
     setup();
     init_spi();
-    fillAll(0,0,20);
-    
-    
-    while (1) {
-        while( vzdalenost < minVzdalenost){
-            tooClose();
+    fillAll(0,120,0);
+
+    lcd_init();     // init GPIOS and init lcd to 4bit mode
+
+    sprintf(text,"vzdalenost=%3u", minVzdalenost);
+    lcd_clear();
+    lcd_puts(text); // "x=00500"
+     while (1) {
+        if(minVzdalenost != vzdalenostMinule){
+            sprintf(text,"vzdalenost=%3u", minVzdalenost);
+            lcd_clear();
+            lcd_puts(text);
             printf("%d\r\n", minVzdalenost);
+            vzdalenostMinule = minVzdalenost;
+            
         }
-        fillAll(255, 120, 0);
-        my_delay_ms(200);
-        printf("%d\r\n", minVzdalenost);
+        if( vzdalenost < minVzdalenost){
+            tooClose(); 
+        }
+        else {
+            fillAll(0,120,0);
+        }
     }
+
+    
+    
+   
 
 }
 
