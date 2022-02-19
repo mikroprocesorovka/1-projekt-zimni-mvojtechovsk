@@ -15,11 +15,7 @@
 #define TI1_PORT GPIOD
 #define TI1_PIN  GPIO_PIN_4
 
-#define TRGG_PORT GPIOC
-#define TRGG_PIN  GPIO_PIN_7
-#define TRGG_ON   GPIO_WriteHigh(TRGG_PORT, TRGG_PIN);
-#define TRGG_OFF  GPIO_WriteLow(TRGG_PORT, TRGG_PIN);
-#define TRGG_REVERSE GPIO_WriteReverse(TRGG_PORT, TRGG_PIN);
+
 
 #define MASURMENT_PERON 444    // maximální celkový čas měření (ms)
 
@@ -29,12 +25,12 @@
 
 #define DT_PORT GPIOF
 #define DT_PIN  GPIO_PIN_3
-/*
 
+#define PULSE_LEN 2 // délka spouštěcího (trigger) pulzu pro ultrazvuk
+#define MEASURMENT_PERIOD 100 // perioda měření ultrazvukem (měla by být víc jak (maximální_dosah*2)/rychlost_zvuku)
+uint16_t capture; // tady bude aktuální výsledek měření (času)
+uint8_t capture_flag=0; // tady budeme indikovat že v capture je čerstvý výsledek
 
-neopixel DI - PC6
-
-*/
 uint8_t colors[24*3];
 uint16_t minVzdalenost = 100;
 uint16_t vzdalenost = 120;
@@ -178,6 +174,8 @@ void clearAll(){
     neopixel(colors, sizeof(colors));
 }
 
+
+
 void tooClose(void){
         fillAll(0, 150, 0);
         my_delay_ms(200);
@@ -185,7 +183,50 @@ void tooClose(void){
         my_delay_ms(200);
     }
     
+void process_measurment(void){
+	static uint8_t stage=0; // stavový automat
+	static uint16_t time=0; // pro časování pomocí milis
+	switch(stage){
+	case 0:	// čekáme než uplyne  MEASURMENT_PERIOD abychom odstartovali měření
+		if(milis()-time > MEASURMENT_PERIOD){
+			time = milis(); 
+			GPIO_WriteHigh(GPIOC,GPIO_PIN_5); // zahájíme trigger pulz
+			stage = 1; // a bdueme čekat až uplyne čas trigger pulzu
+		}
+		break;
+	case 1: // čekáme než uplyne PULSE_LEN (generuje trigger pulse)
+		if(milis()-time > PULSE_LEN){
+			GPIO_WriteLow(GPIOC,GPIO_PIN_5); // ukončíme trigger pulz
+			stage = 2; // a přejdeme do fáze kdy očekáváme echo
+		}
+		break;
+	case 2: // čekáme jestli dostaneme odezvu (čekáme na echo)
+		if(TIM1_GetFlagStatus(TIM1_FLAG_CC2) != RESET){ // hlídáme zda timer hlásí změření pulzu
+			capture = TIM1_GetCapture2(); // uložíme výsledek měření
+			capture_flag=1; // dáme vědět zbytku programu že máme nový platný výsledek
+			stage = 0; // a začneme znovu od začátku
+		}else if(milis()-time > MEASURMENT_PERIOD){ // pokud timer nezachytil pulz po dlouhou dobu, tak echo nepřijde
+			stage = 0; // a začneme znovu od začátku
+		}		
+		break;
+	default: // pokud se cokoli pokazí
+	stage = 0; // začneme znovu od začátku
+	}	
+}
 
+
+void init_tim1(void){
+GPIO_Init(GPIOC, GPIO_PIN_1, GPIO_MODE_IN_FL_NO_IT); // PC1 (TIM1_CH1) jako vstup
+TIM1_TimeBaseInit(15,TIM1_COUNTERMODE_UP,0xffff,0); // timer necháme volně běžet (do maximálního stropu) s časovou základnou 1MHz (1us)
+// Konfigurujeme parametry capture kanálu 1 - komplikované, nelze popsat v krátkém komentáři
+TIM1_ICInit(TIM1_CHANNEL_1,TIM1_ICPOLARITY_RISING,TIM1_ICSELECTION_DIRECTTI,TIM1_ICPSC_DIV1,0);
+// Konfigurujeme parametry capture kanálu 2 - komplikované, nelze popsat v krátkém komentáři
+TIM1_ICInit(TIM1_CHANNEL_2,TIM1_ICPOLARITY_FALLING,TIM1_ICSELECTION_INDIRECTTI,TIM1_ICPSC_DIV1,0);
+TIM1_SelectInputTrigger(TIM1_TS_TI1FP1); // Zdroj signálu pro Clock/Trigger controller 
+TIM1_SelectSlaveMode(TIM1_SLAVEMODE_RESET); // Clock/Trigger má po příchodu signálu provést RESET timeru
+TIM1_ClearFlag(TIM1_FLAG_CC2); // pro jistotu vyčistíme vlajku signalizující záchyt a změření echo pulzu
+TIM1_Cmd(ENABLE); // spustíme timer ať běží na pozadí
+}
 
 
 int main(void)
@@ -197,9 +238,10 @@ int main(void)
     init_spi();
     init_enc();        // inicializace vstupu enkodéru
     init_timer();    // spustí tim3 s poerušením každé 2ms
+    init_tim1(); // nastavit a spustit timer
     setup();
-    init_spi();
-    fillAll(0,120,0);
+    fillAll(0,10,0);
+    GPIO_Init(GPIOC, GPIO_PIN_5, GPIO_MODE_OUT_PP_LOW_SLOW); // výstup - "trigger pulz pro ultrazvuk"
 
     lcd_init();     // init GPIOS and init lcd to 4bit mode
 
@@ -207,6 +249,7 @@ int main(void)
     lcd_clear();
     lcd_puts(text); // "x=00500"
      while (1) {
+        //process_measurment(); // obsluhuje neblokujícím způsobem měření ultrazvukem
         if(minVzdalenost != vzdalenostMinule){
             sprintf(text,"vzdalenost=%3u", minVzdalenost);
             lcd_clear();
@@ -219,13 +262,12 @@ int main(void)
             tooClose(); 
         }
         else {
-            fillAll(0,120,0);
+            fillAll(0,10,0);
         }
     }
 
     
-    
-   
+
 
 }
 
