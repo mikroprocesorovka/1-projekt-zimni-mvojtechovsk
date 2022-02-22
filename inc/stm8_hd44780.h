@@ -75,8 +75,8 @@
 #define LCD_E_PORT      GPIOF
 #define LCD_E_PIN   GPIO_PIN_5
 
-#define LCD_D4_PORT     GPIOG
-#define LCD_D4_PIN  GPIO_PIN_0
+#define LCD_D4_PORT     GPIOD
+#define LCD_D4_PIN  GPIO_PIN_6
 
 #define LCD_D5_PORT     GPIOG
 #define LCD_D5_PIN  GPIO_PIN_1

@@ -9,22 +9,19 @@
 #include "stm8s_adc2.h"
 #include "uart1.h"
 
-#define _ISOC99_SOURCE
+/*#define _ISOC99_SOURCE
 #define _GNU_SOURCE
 
 #define TI1_PORT GPIOD
-#define TI1_PIN  GPIO_PIN_4
-
-
+#define TI1_PIN  GPIO_PIN_4*/
 
 #define MASURMENT_PERON 444    // maximální celkový čas měření (ms)
 
-
 #define CLK_PORT GPIOF
 #define CLK_PIN  GPIO_PIN_4
-
 #define DT_PORT GPIOF
 #define DT_PIN  GPIO_PIN_3
+//neopixel data PC6
 
 #define PULSE_LEN 2 // délka spouštěcího (trigger) pulzu pro ultrazvuk
 #define MEASURMENT_PERIOD 100 // perioda měření ultrazvukem (měla by být víc jak (maximální_dosah*2)/rychlost_zvuku)
@@ -35,8 +32,10 @@ uint8_t colors[24*3];
 uint16_t minVzdalenost = 100;
 uint16_t vzdalenost = 120;
 uint16_t vzdalenostMinule;
-static uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
+uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
 	// pokud je na vstupu A hodnota 0 a minule byla hodnota 1 tak jsme zachytili sestupnou hranu
+bool zmena = FALSE;
+uint16_t counter = 0;
 void init_spi(void)
 {
     // Software slave managment (disable CS/SS input), BiDirectional-Mode release MISO pin to general purpose
@@ -182,10 +181,10 @@ void tooClose(void){
         clearAll();
         my_delay_ms(200);
     }
-    
+
+uint8_t stage=0; // stavový automat
+uint16_t time=0; // pro časování pomocí milis    
 void process_measurment(void){
-	static uint8_t stage=0; // stavový automat
-	static uint16_t time=0; // pro časování pomocí milis
 	switch(stage){
 	case 0:	// čekáme než uplyne  MEASURMENT_PERIOD abychom odstartovali měření
 		if(milis()-time > MEASURMENT_PERIOD){
@@ -203,12 +202,15 @@ void process_measurment(void){
 	case 2: // čekáme jestli dostaneme odezvu (čekáme na echo)
 		if(TIM1_GetFlagStatus(TIM1_FLAG_CC2) != RESET){ // hlídáme zda timer hlásí změření pulzu
 			capture = TIM1_GetCapture2(); // uložíme výsledek měření
+            capture = capture * 0.034/2;
+            printf("%d\r\n", capture);
 			capture_flag=1; // dáme vědět zbytku programu že máme nový platný výsledek
 			stage = 0; // a začneme znovu od začátku
 		}else if(milis()-time > MEASURMENT_PERIOD){ // pokud timer nezachytil pulz po dlouhou dobu, tak echo nepřijde
 			stage = 0; // a začneme znovu od začátku
 		}		
 		break;
+      
 	default: // pokud se cokoli pokazí
 	stage = 0; // začneme znovu od začátku
 	}	
@@ -231,27 +233,41 @@ TIM1_Cmd(ENABLE); // spustíme timer ať běží na pozadí
 
 int main(void)
 {
+    
     char text[32] = "";
     vzdalenostMinule = minVzdalenost;
     CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1); // 16MHz from internal RC
-    init_milis(); // millis using TIM4 - not necessary
-    init_spi();
+    
+    //init_spi();
     init_enc();        // inicializace vstupu enkodéru
-    init_timer();    // spustí tim3 s poerušením každé 2ms
+    init_timer();// spustí tim3 s poerušením každé 2ms
     init_tim1(); // nastavit a spustit timer
     setup();
-    fillAll(0,10,0);
-    GPIO_Init(GPIOC, GPIO_PIN_5, GPIO_MODE_OUT_PP_LOW_SLOW); // výstup - "trigger pulz pro ultrazvuk"
-
     lcd_init();     // init GPIOS and init lcd to 4bit mode
-
-    sprintf(text,"vzdalenost=%3u", minVzdalenost);
+    sprintf(text,"hranice=%3u cm", minVzdalenost);
     lcd_clear();
-    lcd_puts(text); // "x=00500"
-     while (1) {
-        //process_measurment(); // obsluhuje neblokujícím způsobem měření ultrazvukem
+    lcd_puts(text);
+    sprintf(text,"vzdalenost=%3u cm", capture);
+    lcd_gotoxy(0,1);
+    lcd_puts(text);
+    //fillAll(0,10,0);
+    GPIO_Init(GPIOC, GPIO_PIN_5, GPIO_MODE_OUT_PP_LOW_SLOW); // výstup - "trigger pulz pro ultrazvuk"
+    while (TRUE) {
+        process_measurment();
+        if(counter >= 1000){
+            sprintf(text,"hranice=%3ucm", minVzdalenost);
+            lcd_clear();
+            lcd_puts(text);
+            sprintf(text,"vzdalenost=%3ucm", capture);
+            lcd_gotoxy(0,1);
+            lcd_puts(text);
+            counter = 0;
+        }
+        else {
+            counter++;
+        }
         if(minVzdalenost != vzdalenostMinule){
-            sprintf(text,"vzdalenost=%3u", minVzdalenost);
+            sprintf(text,"hranice:%3u cm", minVzdalenost);
             lcd_clear();
             lcd_puts(text);
             printf("%d\r\n", minVzdalenost);
@@ -259,13 +275,16 @@ int main(void)
             
         }
         if( vzdalenost < minVzdalenost){
-            tooClose(); 
+            tooClose();
+            zmena = TRUE; 
         }
-        else {
-            fillAll(0,10,0);
-        }
+        if (zmena == TRUE) {
+        //fillAll(10,10,10);
+        zmena = FALSE;
+        } 
+        
+        
     }
-
     
 
 
