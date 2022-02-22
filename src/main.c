@@ -9,11 +9,7 @@
 #include "stm8s_adc2.h"
 #include "uart1.h"
 
-/*#define _ISOC99_SOURCE
-#define _GNU_SOURCE
 
-#define TI1_PORT GPIOD
-#define TI1_PIN  GPIO_PIN_4*/
 
 #define MASURMENT_PERON 444    // maximální celkový čas měření (ms)
 
@@ -22,6 +18,8 @@
 #define DT_PORT GPIOF
 #define DT_PIN  GPIO_PIN_3
 //neopixel data PC6
+#define L_PULSE 6 // 6*1/16MHz = 6*62.5 = 375ns (~400ns)
+#define H_PULSE 12 // 12*1/16MHz = 12*62.5 = 750ns (~800ns)
 
 #define PULSE_LEN 2 // délka spouštěcího (trigger) pulzu pro ultrazvuk
 #define MEASURMENT_PERIOD 100 // perioda měření ultrazvukem (měla by být víc jak (maximální_dosah*2)/rychlost_zvuku)
@@ -29,19 +27,19 @@ uint16_t capture; // tady bude aktuální výsledek měření (času)
 uint8_t capture_flag=0; // tady budeme indikovat že v capture je čerstvý výsledek
 
 uint8_t colors[24*3];
-uint16_t minVzdalenost = 100;
-uint16_t vzdalenost = 120;
+uint16_t minVzdalenost = 50;
 uint16_t vzdalenostMinule;
 uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
 	// pokud je na vstupu A hodnota 0 a minule byla hodnota 1 tak jsme zachytili sestupnou hranu
 bool zmena = FALSE;
-uint16_t counter = 0;
-void init_spi(void)
-{
-    // Software slave managment (disable CS/SS input), BiDirectional-Mode release MISO pin to general purpose
-    SPI->CR2 |= SPI_CR2_SSM | SPI_CR2_SSI | SPI_CR2_BDM | SPI_CR2_BDOE;
-    // Enable SPI as master at maximum speed (F_MCU/2, there 16/2=8MHz)
-    SPI->CR1 |= SPI_CR1_SPE | SPI_CR1_MSTR;
+
+uint32_t casMinuel;
+
+void init_tim2(void){
+	GPIO_Init(GPIOD,GPIO_PIN_4,GPIO_MODE_OUT_PP_LOW_FAST); // PD3 (TIM2_CH1) as output
+	TIM2_OC1Init(TIM2_OCMODE_PWM2, TIM2_OUTPUTSTATE_ENABLE,1, TIM2_OCPOLARITY_HIGH); // One-Pulse configuration (with CCR1/delay=1)
+  TIM2_TimeBaseInit(TIM2_PRESCALER_1, L_PULSE); // Selecting prescaler (Period/ARR value will be set to relevant value later)
+  TIM2_SelectOnePulseMode(TIM2_OPMODE_SINGLE); // Selecting One Pulse Mode
 }
 
 void setup(void)
@@ -78,21 +76,22 @@ void setup(void)
 void neopixel(uint8_t * data, uint16_t length)
 {
     uint8_t mask;
-    disableInterrupts();        // can be omitted if interrupts do not take more then about ~25us
-    while(length--) {            // for all bytes from input array
-        mask = 0b10000000;     // for all bits in byte
-        while (mask) {
-            while (!(SPI->SR & SPI_SR_TXE));    // wait for empty SPI buffer
-            if (mask & data[length]) {  // send pulse with coresponding length ("L" od "H")
-                SPI->DR = H_PATTERN;
-            } else {
-                SPI->DR = L_PATTERN;
-            }
-            mask = mask >> 1;
-        }
-    }
-    enableInterrupts();
-    while (SPI->SR & SPI_SR_BSY); // wait until end of transfer - there should come "reset" (>50us in Low)
+	disableInterrupts(); // can be omitted if interrupts do not take more then about ~25us
+	while(length){			// for all bytes from input array
+		length--;
+		mask=0b10000000;	// for all bits in byte
+		while(mask){
+			while(TIM2->CR1 & TIM2_CR1_CEN); // wait until timer stops (wait if transmitting last bit)
+			if(mask & data[length]){ // send pulse with coresponding length ("L" od "H")
+				TIM2->ARRL = H_PULSE; // set pulse width for "H" bit
+			}else{
+				TIM2->ARRL = L_PULSE; // set pulse width for "L" bit
+			}
+			TIM2->CR1 |= TIM2_CR1_CEN; // Start timer (start single pulse generation)
+			mask = mask >> 1;
+		}
+	}
+	enableInterrupts();
 }
 
 
@@ -117,11 +116,16 @@ void my_delay_ms(uint16_t ms) {
 		if(GPIO_ReadInputPin(DT_PORT,DT_PIN) == RESET){
 			// log.0 na vstupu B (krok jedním smìrem)
             vzdalenostMinule = minVzdalenost;
-			minVzdalenost++;
+            if(minVzdalenost < 400){
+                minVzdalenost++;
+            }
+			
 		}else{
 			// log.1 na vstupu B (krok druhým smìrem)
             vzdalenostMinule = minVzdalenost;
-			minVzdalenost--;
+			if(minVzdalenost > 10){
+                minVzdalenost--;
+            }
 		}
 	}
 	if(GPIO_ReadInputPin(CLK_PORT,CLK_PIN) != RESET){minule = 1;} // pokud je vstup A v log.1
@@ -138,28 +142,12 @@ GPIO_Init(CLK_PORT,CLK_PIN,GPIO_MODE_IN_PU_NO_IT);  // vstup, s vnitøním pullu
 GPIO_Init(DT_PORT,DT_PIN,GPIO_MODE_IN_PU_NO_IT);
 }
 
-void init_timer(void){
+void init_tim3(void){
 TIM3_TimeBaseInit(TIM3_PRESCALER_16,1999); // perioda pøeteèení/update 2ms
 TIM3_ITConfig(TIM3_IT_UPDATE, ENABLE); // povolit pøerušení
 TIM3_Cmd(ENABLE); // spustit timer
 }
 
-void vzdalenostMin(void){
-}
-
-void fillAll(uint8_t r,uint8_t g,uint8_t b ) {
-    
-    uint8_t  i = 0;
-    while(i<24){
-        uint8_t index = i*3;
-        colors[index] = r;
-        colors[index+1] = g;
-        colors[index+2] = b;
-        i = i+1;
-    }
-    
-    neopixel(colors, sizeof(colors));
-}
 
 void clearAll(){
     uint8_t  i = 0;
@@ -175,12 +163,7 @@ void clearAll(){
 
 
 
-void tooClose(void){
-        fillAll(0, 150, 0);
-        my_delay_ms(200);
-        clearAll();
-        my_delay_ms(200);
-    }
+
 
 uint8_t stage=0; // stavový automat
 uint16_t time=0; // pro časování pomocí milis    
@@ -229,66 +212,105 @@ TIM1_SelectSlaveMode(TIM1_SLAVEMODE_RESET); // Clock/Trigger má po příchodu s
 TIM1_ClearFlag(TIM1_FLAG_CC2); // pro jistotu vyčistíme vlajku signalizující záchyt a změření echo pulzu
 TIM1_Cmd(ENABLE); // spustíme timer ať běží na pozadí
 }
+char text[32] = "";
+void LCD_print(void){
+    sprintf(text,"hranice=%3ucm", minVzdalenost);
+    lcd_clear();
+    lcd_puts(text);
+    sprintf(text,"vzdalenost=%3ucm", capture);
+    lcd_gotoxy(0,1);
+    lcd_puts(text);    
+}
+uint8_t green (uint16_t x){
+    x = x%256;
+	if(x<42){
+		return x*50/42;
+	}
+	if(x<128){
+		return 50;
+	}
+	if(x<170){
+		return 50-((x-128)*50/42);
+	}
+	return 0;
+}
 
+uint8_t red (uint16_t x){
+	return green(x-170);
+}
 
+uint8_t blue (uint16_t x){
+	return green(x-85);
+}
+
+void fillAll(uint8_t x) {
+    
+    uint8_t  i = 0;
+    while(i<24){
+        uint8_t index = i*3;
+        colors[index] = blue(x);
+        colors[index+1] = red(x);
+        colors[index+2] = green(x);
+        i = i+1;
+    }
+    
+    neopixel(colors, sizeof(colors));
+}
+
+void tooClose(void){
+        fillAll(255);
+        my_delay_ms(100);
+        clearAll();
+        my_delay_ms(100);
+    }
 int main(void)
 {
-    
-    char text[32] = "";
+    uint8_t captureColor;
     vzdalenostMinule = minVzdalenost;
     CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1); // 16MHz from internal RC
     
-    //init_spi();
     init_enc();        // inicializace vstupu enkodéru
-    init_timer();// spustí tim3 s poerušením každé 2ms
+    init_tim3();// spustí tim3 s poerušením každé 2ms
     init_tim1(); // nastavit a spustit timer
+    init_tim2();
     setup();
     lcd_init();     // init GPIOS and init lcd to 4bit mode
-    sprintf(text,"hranice=%3u cm", minVzdalenost);
-    lcd_clear();
-    lcd_puts(text);
-    sprintf(text,"vzdalenost=%3u cm", capture);
-    lcd_gotoxy(0,1);
-    lcd_puts(text);
-    //fillAll(0,10,0);
+    LCD_print();
     GPIO_Init(GPIOC, GPIO_PIN_5, GPIO_MODE_OUT_PP_LOW_SLOW); // výstup - "trigger pulz pro ultrazvuk"
+    casMinuel = milis();
     while (TRUE) {
         process_measurment();
-        if(counter >= 1000){
-            sprintf(text,"hranice=%3ucm", minVzdalenost);
-            lcd_clear();
-            lcd_puts(text);
-            sprintf(text,"vzdalenost=%3ucm", capture);
-            lcd_gotoxy(0,1);
-            lcd_puts(text);
-            counter = 0;
-        }
-        else {
-            counter++;
-        }
+        if( milis() - casMinuel >= 400){
+            LCD_print();
+            milis();
+            
+            casMinuel = milis();
+            }
+    
         if(minVzdalenost != vzdalenostMinule){
-            sprintf(text,"hranice:%3u cm", minVzdalenost);
-            lcd_clear();
-            lcd_puts(text);
+            LCD_print();
             printf("%d\r\n", minVzdalenost);
             vzdalenostMinule = minVzdalenost;
             
         }
-        if( vzdalenost < minVzdalenost){
+        if( capture < minVzdalenost){
             tooClose();
-            zmena = TRUE; 
+        }else {
+            if(capture>255){
+            captureColor = 255;
+            }
+            else {
+                captureColor = capture;
+            }
+            fillAll(captureColor);  
         }
-        if (zmena == TRUE) {
-        //fillAll(10,10,10);
-        zmena = FALSE;
-        } 
+    }  
         
-        
-    }
+}
     
 
 
-}
+
 
 
 /*-------------------------------  Assert -----------------------------------*/
