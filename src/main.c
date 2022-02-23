@@ -1,18 +1,13 @@
 #include "stm8s.h"
 #include "milis.h"
-
 #include "delay.h"
 #include <stdio.h>
 #include "spse_stm8.h"
 #include "stm8_hd44780.h"
-
 #include "stm8s_adc2.h"
 #include "uart1.h"
 
-
-
 #define MASURMENT_PERON 444    // maximální celkový čas měření (ms)
-
 #define CLK_PORT GPIOF
 #define CLK_PIN  GPIO_PIN_4
 #define DT_PORT GPIOF
@@ -20,19 +15,17 @@
 //neopixel data PC6
 #define L_PULSE 6 // 6*1/16MHz = 6*62.5 = 375ns (~400ns)
 #define H_PULSE 12 // 12*1/16MHz = 12*62.5 = 750ns (~800ns)
-
 #define PULSE_LEN 2 // délka spouštěcího (trigger) pulzu pro ultrazvuk
 #define MEASURMENT_PERIOD 100 // perioda měření ultrazvukem (měla by být víc jak (maximální_dosah*2)/rychlost_zvuku)
-uint16_t capture; // tady bude aktuální výsledek měření (času)
-uint8_t capture_flag=0; // tady budeme indikovat že v capture je čerstvý výsledek
 
+int16_t capture; // tady bude aktuální výsledek měření (času)
+uint8_t capture_flag=0; // tady budeme indikovat že v capture je čerstvý výsledek
 uint8_t colors[24*3];
-uint16_t minVzdalenost = 50;
+uint16_t minVzdalenost = 15;
 uint16_t vzdalenostMinule;
 uint16_t minule=1; // pamatuje si minulý stav vstupu A (nutné k detekování sestupné hrany)
 	// pokud je na vstupu A hodnota 0 a minule byla hodnota 1 tak jsme zachytili sestupnou hranu
 bool zmena = FALSE;
-
 uint32_t casMinuel;
 
 void init_tim2(void){
@@ -94,9 +87,6 @@ void neopixel(uint8_t * data, uint16_t length)
 	enableInterrupts();
 }
 
-
-
-
 void my_delay_ms(uint16_t ms) {
     uint16_t  i;
     for (i=0; i<ms; i = i+1){
@@ -107,7 +97,6 @@ void my_delay_ms(uint16_t ms) {
     }
 }
 
- 
  void process_enc(void){
 	
 	if(GPIO_ReadInputPin(CLK_PORT,CLK_PIN) == RESET && minule==1){
@@ -162,9 +151,6 @@ void clearAll(){
 }
 
 
-
-
-
 uint8_t stage=0; // stavový automat
 uint16_t time=0; // pro časování pomocí milis    
 void process_measurment(void){
@@ -193,12 +179,10 @@ void process_measurment(void){
 			stage = 0; // a začneme znovu od začátku
 		}		
 		break;
-      
 	default: // pokud se cokoli pokazí
 	stage = 0; // začneme znovu od začátku
 	}	
 }
-
 
 void init_tim1(void){
 GPIO_Init(GPIOC, GPIO_PIN_1, GPIO_MODE_IN_FL_NO_IT); // PC1 (TIM1_CH1) jako vstup
@@ -283,7 +267,13 @@ int main(void)
         if( milis() - casMinuel >= 400){
             LCD_print();
             milis();
-            
+            if(capture>255){
+            captureColor = 255;
+            }
+            else {
+                captureColor = capture;
+            }
+            fillAll(captureColor);  
             casMinuel = milis();
             }
     
@@ -295,23 +285,7 @@ int main(void)
         }
         if( capture < minVzdalenost){
             tooClose();
-        }else {
-            if(capture>255){
-            captureColor = 255;
-            }
-            else {
-                captureColor = capture;
-            }
-            fillAll(captureColor);  
         }
     }  
-        
 }
     
-
-
-
-
-
-/*-------------------------------  Assert -----------------------------------*/
-/*#include "__assert__.h"*/
